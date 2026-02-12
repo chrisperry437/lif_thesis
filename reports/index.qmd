@@ -1,0 +1,18 @@
+# Benchmarking Laser-induced Fluorescence and Machine Learning for real-time identification of bacteria in bioaerosols
+
+![license](https://img.shields.io/badge/license-MIT-green)
+![python](https://img.shields.io/badge/python->3.11-orange?logo=Python&logoColor=white)
+![Quarto](https://img.shields.io/badge/quarto->1.6-skyblue?logo=quarto)
+![Zenodo](https://zenodo.org/badge/DOI/10.5281/zenodo.15485701.svg)
+
+## Overview
+
+This repository contains the code and data to reproduce the results of the manuscript *"Benchmarking Laser-induced Fluorescence and Machine Learning for real-time identification of bacteria in bioaerosols"* by Fontal et al. (2025). In this study, we demonstrate a method to (1) aerosolize bacteria using a nebulizer emulating bacteria-laden droplets, (2) modify an existing equipment (Rapid-E) to facilitate the characterization of microbial aerosols and (3) use machine learning models to detect bacteria and classify them in near-real time. 
+
+## Reports
+
+Here you will find two reports:
+
+1. [bacteria_ms.ipynb](bacteria_ms.ipynb): This notebook contains the main analysis and results of the manuscript, where we analyze the aerosolized bacteria and train and evaluate random forests to classify them.
+
+2. [fluorophore_ms.ipynb](fluorophores_ms.ipynb): This notebook contains the tests that we ran with aerosolized fluorophores, which were used to validate the Rapid-E modifications and its ability to detect the fluorophores characteristic of bacterial cells as part of aerosol particles.

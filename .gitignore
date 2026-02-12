@@ -1,0 +1,6 @@
+.venv/*
+reports/_site/*
+reports/.quarto/*
+data/Bacterial Samples/*
+data/fluorophores/*
+.DS_Store

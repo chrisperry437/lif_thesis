@@ -1,0 +1,29 @@
+[tool]
+name = "automatic-recognition"
+description = ""
+authors = ["Christopher Perry <chrisperry437@gmail.com>"]
+license = "MIT"
+
+
+[build-system]
+requires = ["uv", "uv_build"]
+build-backend = "uv_build"
+
+
+[project]
+name = "automatic_recognition"
+version = "0.1.0"
+dependencies = [
+    "numpy>=1.21.0",
+    "pandas>=1.3.0",
+    "matplotlib>=3.4.0",
+    "plotnine>=0.8.0",
+    "scikit-learn>=0.24.0",
+    "seaborn>=0.11.0",
+    "tqdm>=4.60.0",
+    "mizani>=0.7.0",
+    "joblib>=1.0.0",
+    "scipy>=1.7.0",
+    "jupyter>=1.0.0",
+    "torch>=2.2,<3.0"
+]

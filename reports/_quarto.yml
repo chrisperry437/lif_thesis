@@ -1,0 +1,54 @@
+project:
+  type: website
+
+  render:
+    - index.qmd
+    - data-overview.qmd
+    - baseline-reproduction.qmd
+    - model-comparison.qmd
+    - mixture-analysis.qmd
+
+execute:
+  freeze: true
+
+website:
+  title: "Automatic Recognition of Microbial Life — Master’s Thesis"
+  favicon: assets/favicon.ico
+
+  navbar:
+    left:
+      - text: Home
+        href: index.qmd
+
+      - text: Reports
+        menu:
+          - text: "Data overview"
+            href: data-overview.qmd
+          - text: "Baseline reproduction"
+            href: baseline-reproduction.qmd
+          - text: "Model comparison"
+            href: model-comparison.qmd
+          - text: "Mixture analysis"
+            href: mixture-analysis.qmd
+
+      - text: About
+        menu:
+          - text: "This project"
+            href: about.qmd
+
+    right:
+      - icon: github
+        href: https://github.com/<chrisperry437>/<Automatic-Recognition-of-Microbial-Life>
+
+format:
+  html:
+    number-sections: true
+    highlight-style: github
+    theme:
+      light: litera
+    css: custom.css
+    toc: true
+    toc-location: right
+    code-tools:
+      source: true
+      toggle: true

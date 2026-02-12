@@ -1,0 +1,71 @@
+---
+title: "About this project"
+format: html
+toc: false
+---
+
+## Overview
+
+This website documents the experiments, reproductions, and extensions developed for my Master’s thesis in Data Science.
+
+The goal of this project is to analyze and improve methods for **laser-induced fluorescence (LIF)–based detection and classification of bacteria in aerosols**, with a focus on reproducibility, model comparison, and methodological extensions.
+
+All analyses, implementations, and evaluations presented here were conducted as part of an independent academic thesis.
+
+---
+
+## Author
+
+**Christopher Perry**  
+MSc Fundamentals of Data Science
+Facultat de Matematiques i Informatica  / Universitat de Barcelona
+
+---
+
+## Relationship to prior research
+
+Parts of this work reproduce and build upon prior research and open-source materials developed by  
+**:Alejandro Fontal[oaicite:0]{index=0}** and collaborators at  
+**:contentReference[oaicite:1]{index=1}**.
+
+Their repository and publications provided:
+
+- the original experimental framing  
+- baseline processing pipelines  
+- initial classification approaches  
+
+These resources were used strictly as a **baseline for reproduction and comparison**.
+
+All new analyses, refactoring, modeling choices, experiments, and conclusions presented on this site are my own contributions unless explicitly stated otherwise.
+
+This project is **not an official collaboration or institutional affiliation** with ISGlobal.
+
+---
+
+## Contributions in this thesis
+
+This thesis extends the baseline work through:
+
+- structured and reproducible data pipelines
+- baseline result replication
+- systematic model comparison
+- mixture and robustness analyses
+- improved experiment tracking and documentation
+- add more here as needed...
+
+The aim is to extend the previous research with further model development and evaluate model performance with mixed aerosolized solutions.
+
+---
+
+## Reproducibility
+
+All code, notebooks, and reports are version-controlled and intended to be fully reproducible.  
+Experiments are frozen during site builds to ensure consistent results across renders.
+
+---
+
+## Acknowledgements
+
+I am grateful to the original authors for sharing their work openly, which made this reproduction and extension possible.
+
+I also thank my academic supervisors and instructors at UB for guidance and feedback throughout this project.
