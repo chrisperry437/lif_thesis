@@ -1,5 +1,5 @@
 [tool]
-name = "automatic-recognition"
+name = "lif_thesis"
 description = ""
 authors = ["Christopher Perry <chrisperry437@gmail.com>"]
 license = "MIT"
@@ -11,7 +11,7 @@ build-backend = "uv_build"
 
 
 [project]
-name = "automatic_recognition"
+name = "lif_thesis"
 version = "0.1.0"
 dependencies = [
     "numpy>=1.21.0",
