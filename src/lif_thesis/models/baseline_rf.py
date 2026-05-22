@@ -1,3 +1,5 @@
+##Baseline Random Forest classifier for LIF thesis experiments
+
 from __future__ import annotations
 
 from pathlib import Path
