@@ -1,15 +1,9 @@
-##Implements leakage-free data splits for training, validation and testing
+## Implements leakage-free data splits for training, validation and testing
 
 from __future__ import annotations
 
-from collections import Counter
-
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import (
-    GroupShuffleSplit,
-    StratifiedGroupKFold,
-)
 
 
 def validate_split_inputs(
@@ -17,9 +11,6 @@ def validate_split_inputs(
     label_col: str,
     group_col: str,
 ):
-    """
-    Validate split inputs.
-    """
     if label_col not in df.columns:
         raise ValueError(f"{label_col} not found in dataframe.")
 
@@ -37,27 +28,74 @@ def summarize_split(
     df: pd.DataFrame,
     indices: np.ndarray,
     label_col: str,
+    group_col: str,
     name: str,
 ):
-    """
-    Print useful split diagnostics.
-    """
     subset = df.iloc[indices]
 
     print(f"\n{name}")
     print("-" * 60)
     print(f"N rows: {len(subset)}")
-    print(f"N groups: {subset['__group__'].nunique()}")
-
-    counts = subset[label_col].value_counts(normalize=True)
+    print(f"N groups: {subset[group_col].nunique()}")
 
     print("\nClass distribution:")
-    print(counts)
+    print(subset[label_col].value_counts(normalize=True))
+
+    print("\nGroups per class:")
+    print(subset.groupby(label_col)[group_col].nunique())
+
+
+def _split_groups_for_one_label(
+    groups: np.ndarray,
+    train_size: float,
+    val_size: float,
+    test_size: float,
+    rng: np.random.Generator,
+):
+    """
+    Split unique groups for a single label into train/val/test.
+
+    Ensures at least one validation and one test group when possible.
+    """
+    groups = np.array(groups)
+    rng.shuffle(groups)
+
+    n_groups = len(groups)
+
+    if n_groups < 3:
+        raise ValueError(
+            "Each label needs at least 3 groups to create train/val/test splits. "
+            f"Found only {n_groups} groups."
+        )
+
+    n_train = int(round(train_size * n_groups))
+    n_val = int(round(val_size * n_groups))
+    n_test = n_groups - n_train - n_val
+
+    # Ensure val/test are represented when possible
+    if n_val < 1:
+        n_val = 1
+    if n_test < 1:
+        n_test = 1
+
+    # Adjust train if val/test correction made the total too large
+    n_train = n_groups - n_val - n_test
+
+    if n_train < 1:
+        raise ValueError(
+            f"Not enough groups to split. Got {n_groups} groups."
+        )
+
+    train_groups = groups[:n_train]
+    val_groups = groups[n_train:n_train + n_val]
+    test_groups = groups[n_train + n_val:]
+
+    return train_groups, val_groups, test_groups
 
 
 def make_group_split(
     df: pd.DataFrame,
-    label_col: str = "label",
+    label_col: str = "species",
     group_col: str = "raw_file",
     train_size: float = 0.70,
     val_size: float = 0.15,
@@ -67,203 +105,110 @@ def make_group_split(
     verbose: bool = True,
 ):
     """
-    Create grouped train/val/test splits.
+    Create leakage-free grouped train/validation/test splits.
 
-    Features:
-    ----------
-    - Prevents leakage using group-based splitting
-    - Attempts stratification when possible
-    - Returns row indices for train/val/test
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Input dataframe
-
-    label_col : str
-        Column used for stratification
-
-    group_col : str
-        Column defining leakage-safe groups
-        (e.g. raw_file, run_id, experiment_id)
-
-    train_size : float
-        Fraction of data in training split
-
-    val_size : float
-        Fraction of data in validation split
-
-    test_size : float
-        Fraction of data in test split
-
-    stratify : bool
-        Attempt stratified grouped split
-
-    random_state : int
-        Random seed
+    This implementation is designed for datasets like yours where:
+    - each raw_file belongs to exactly one species
+    - raw_file should not appear in more than one split
+    - every species should appear in train, validation, and test
 
     Returns
     -------
     train_idx, val_idx, test_idx : np.ndarray
+        Integer row positions for df.iloc[...].
     """
 
     validate_split_inputs(df, label_col, group_col)
 
     total = train_size + val_size + test_size
-
     if not np.isclose(total, 1.0):
         raise ValueError(
             f"train/val/test sizes must sum to 1. Got {total}"
         )
 
-    df = df.copy()
+    df = df.copy().reset_index(drop=True)
 
-    # Internal helper column
-    df["__group__"] = df[group_col].astype(str)
+    # Check that each group has only one label.
+    group_label_counts = df.groupby(group_col)[label_col].nunique()
+    invalid_groups = group_label_counts[group_label_counts > 1]
 
-    X = np.arange(len(df))
-    y = df[label_col].values
-    groups = df["__group__"].values
+    if len(invalid_groups) > 0:
+        raise ValueError(
+            "Some groups contain more than one label. "
+            "This split assumes each group belongs to exactly one class. "
+            f"Invalid groups: {invalid_groups.index.tolist()[:10]}"
+        )
 
-    # --------------------------------------------------------
-    # STEP 1: Train vs temp split
-    # --------------------------------------------------------
+    rng = np.random.default_rng(random_state)
+
+    train_groups_all = []
+    val_groups_all = []
+    test_groups_all = []
 
     if stratify:
-        try:
-            sgkf = StratifiedGroupKFold(
-                n_splits=5,
-                shuffle=True,
-                random_state=random_state,
-            )
+        # Split groups separately within each label.
+        for label, label_df in df.groupby(label_col):
+            unique_groups = label_df[group_col].unique()
 
-            splits = list(sgkf.split(X, y, groups))
-
-            # Take first fold as temp
-            train_idx, temp_idx = splits[0]
-
-        except Exception as e:
-            print(
-                f"WARNING: StratifiedGroupKFold failed ({e}). "
-                "Falling back to GroupShuffleSplit."
-            )
-
-            gss = GroupShuffleSplit(
-                n_splits=1,
+            train_groups, val_groups, test_groups = _split_groups_for_one_label(
+                groups=unique_groups,
                 train_size=train_size,
-                random_state=random_state,
+                val_size=val_size,
+                test_size=test_size,
+                rng=rng,
             )
 
-            train_idx, temp_idx = next(
-                gss.split(X, y, groups)
-            )
+            train_groups_all.extend(train_groups)
+            val_groups_all.extend(val_groups)
+            test_groups_all.extend(test_groups)
 
     else:
-        gss = GroupShuffleSplit(
-            n_splits=1,
-            train_size=train_size,
-            random_state=random_state,
-        )
+        # Non-stratified fallback: shuffle all groups globally.
+        unique_groups = df[group_col].unique()
+        rng.shuffle(unique_groups)
 
-        train_idx, temp_idx = next(
-            gss.split(X, y, groups)
-        )
+        n_groups = len(unique_groups)
+        n_train = int(round(train_size * n_groups))
+        n_val = int(round(val_size * n_groups))
+        n_test = n_groups - n_train - n_val
 
-    # --------------------------------------------------------
-    # STEP 2: Split temp -> val/test
-    # --------------------------------------------------------
+        if n_val < 1:
+            n_val = 1
+        if n_test < 1:
+            n_test = 1
 
-    temp_df = df.iloc[temp_idx]
+        n_train = n_groups - n_val - n_test
 
-    temp_X = np.arange(len(temp_df))
-    temp_y = temp_df[label_col].values
-    temp_groups = temp_df["__group__"].values
+        train_groups_all = unique_groups[:n_train]
+        val_groups_all = unique_groups[n_train:n_train + n_val]
+        test_groups_all = unique_groups[n_train + n_val:]
 
-    val_fraction_of_temp = val_size / (val_size + test_size)
+    train_groups_all = set(train_groups_all)
+    val_groups_all = set(val_groups_all)
+    test_groups_all = set(test_groups_all)
 
-    if stratify:
-        try:
-            sgkf_temp = StratifiedGroupKFold(
-                n_splits=2,
-                shuffle=True,
-                random_state=random_state,
-            )
+    # Leakage checks
+    assert len(train_groups_all & val_groups_all) == 0
+    assert len(train_groups_all & test_groups_all) == 0
+    assert len(val_groups_all & test_groups_all) == 0
 
-            val_sub_idx, test_sub_idx = next(
-                sgkf_temp.split(
-                    temp_X,
-                    temp_y,
-                    temp_groups,
-                )
-            )
-
-        except Exception as e:
-            print(
-                f"WARNING: Temp stratified split failed ({e}). "
-                "Falling back to GroupShuffleSplit."
-            )
-
-            gss_temp = GroupShuffleSplit(
-                n_splits=1,
-                train_size=val_fraction_of_temp,
-                random_state=random_state,
-            )
-
-            val_sub_idx, test_sub_idx = next(
-                gss_temp.split(
-                    temp_X,
-                    temp_y,
-                    temp_groups,
-                )
-            )
-
-    else:
-        gss_temp = GroupShuffleSplit(
-            n_splits=1,
-            train_size=val_fraction_of_temp,
-            random_state=random_state,
-        )
-
-        val_sub_idx, test_sub_idx = next(
-            gss_temp.split(
-                temp_X,
-                temp_y,
-                temp_groups,
-            )
-        )
-
-    # Convert back to original dataframe indices
-    val_idx = temp_df.iloc[val_sub_idx].index.values
-    test_idx = temp_df.iloc[test_sub_idx].index.values
-
-    # --------------------------------------------------------
-    # Final sanity checks
-    # --------------------------------------------------------
-
-    train_groups = set(df.iloc[train_idx]["__group__"])
-    val_groups = set(df.iloc[val_idx]["__group__"])
-    test_groups = set(df.iloc[test_idx]["__group__"])
-
-    assert len(train_groups & val_groups) == 0
-    assert len(train_groups & test_groups) == 0
-    assert len(val_groups & test_groups) == 0
+    train_idx = df.index[df[group_col].isin(train_groups_all)].to_numpy()
+    val_idx = df.index[df[group_col].isin(val_groups_all)].to_numpy()
+    test_idx = df.index[df[group_col].isin(test_groups_all)].to_numpy()
 
     if verbose:
         print("\nSplit Summary")
         print("=" * 60)
 
-        summarize_split(df, train_idx, label_col, "TRAIN")
-        summarize_split(df, val_idx, label_col, "VALIDATION")
-        summarize_split(df, test_idx, label_col, "TEST")
+        summarize_split(df, train_idx, label_col, group_col, "TRAIN")
+        summarize_split(df, val_idx, label_col, group_col, "VALIDATION")
+        summarize_split(df, test_idx, label_col, group_col, "TEST")
 
         print("\nLeakage Check")
         print("-" * 60)
-        print("Train ∩ Val:", len(train_groups & val_groups))
-        print("Train ∩ Test:", len(train_groups & test_groups))
-        print("Val ∩ Test:", len(val_groups & test_groups))
-
-    # Remove helper column
-    df.drop(columns="__group__", inplace=True)
+        print("Train ∩ Val:", len(train_groups_all & val_groups_all))
+        print("Train ∩ Test:", len(train_groups_all & test_groups_all))
+        print("Val ∩ Test:", len(val_groups_all & test_groups_all))
 
     return train_idx, val_idx, test_idx
 
@@ -276,13 +221,8 @@ def make_pure_vs_mixture_split(
     Specialized split for thesis mixture experiments.
 
     Strategy:
-    ---------
     - Train on pure samples
     - Test on mixture samples
-
-    Returns:
-    --------
-    train_idx, test_idx
     """
 
     if mixture_col not in df.columns:
@@ -296,7 +236,6 @@ def make_pure_vs_mixture_split(
 
     print("\nPure vs Mixture Split")
     print("=" * 60)
-
     print(f"Pure samples (train): {len(train_idx)}")
     print(f"Mixture samples (test): {len(test_idx)}")
 
@@ -304,17 +243,11 @@ def make_pure_vs_mixture_split(
 
 
 if __name__ == "__main__":
-
-    # Example usage
-    import pandas as pd
-
-    df = pd.read_parquet(
-        "data/processed/bacterial_samples.parquet"
-    )
+    df = pd.read_parquet("data/processed/bacterial_samples.parquet")
 
     train_idx, val_idx, test_idx = make_group_split(
         df,
-        label_col="label",
+        label_col="species",
         group_col="raw_file",
         stratify=True,
     )

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from lif_thesis.models.rf import run_baseline_rf_experiment
+from lif_thesis.models.baseline_rf import run_baseline_rf_experiment
 
 
 def main():
@@ -14,7 +14,7 @@ def main():
 
     run_baseline_rf_experiment(
         df=df,
-        label_col="label",
+        label_col="species",
         group_col="raw_file",
         spectra_col="spectrometer",
         output_dir="results/baseline_rf",
