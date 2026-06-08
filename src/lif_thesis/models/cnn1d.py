@@ -12,6 +12,7 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from lif_thesis.data.schemas import RAPIDE_DIMS
 
 from lif_thesis.data.splits import make_group_split
 from lif_thesis.evaluation.metrics import compute_classification_metrics

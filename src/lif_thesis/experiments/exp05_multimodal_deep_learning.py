@@ -24,6 +24,7 @@ import pandas as pd
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
+from lif_thesis.data.schemas import RAPIDE_DIMS
 
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import (
@@ -63,13 +64,13 @@ def stack_vector_column(df: pd.DataFrame, col: str) -> np.ndarray:
 
 def crop_pad_scattering(
     scattering,
-    n_acquisitions: int = 60,
-    n_angles: int = 24,
+    n_acquisitions: int = RAPIDE_DIMS.SCATTERING_TARGET_ACQUISITIONS,
+    n_angles: int = RAPIDE_DIMS.N_SCATTERING_ANGLES,
 ) -> np.ndarray:
     """
     Paper-style scattering processing:
     - crop to 30 us equivalent
-    - 60 acquisitions x 24 angles = 1440 features
+    - {n_acquisitions} acquisitions x {n_angles} angles = {n_acquisitions * n_angles} features
     - zero pad shorter signals
     - normalize each particle to [0, 1]
     """
@@ -353,9 +354,14 @@ def compute_metrics(y_true, y_pred, label_encoder):
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    DEPLOY_MODEL_DIR = Path("models/trained")
+    DEPLOY_CONFIG_DIR = Path("models/configs")
+    DEPLOY_LABEL_DIR = Path("models/label_maps")
+    MODEL_NAME = "multimodal_species_v1"
+
     label_col = "species"
     group_col = "raw_file"
-    fluorescence_threshold = 2000
+    fluorescence_threshold = 2000.0
     random_state = 42
 
     batch_size = 128
@@ -602,6 +608,38 @@ def main():
         ),
     }
 
+    deployment_checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "n_classes": len(label_encoder.classes_),
+        "class_names": label_encoder.classes_.astype(str).tolist(),
+        "model_name": MODEL_NAME,
+        "input_features": [
+            "spectrometer",
+            "lifetime",
+            "scattering_image",
+            "size",
+            "time_asymmetry",
+        ],
+        "fluorescence_threshold": fluorescence_threshold,
+        "scattering_target_acquisitions": RAPIDE_DIMS.SCATTERING_TARGET_ACQUISITIONS,
+        "n_scattering_angles": RAPIDE_DIMS.N_SCATTERING_ANGLES,
+    }
+
+    torch.save(
+        deployment_checkpoint,
+        DEPLOY_MODEL_DIR / f"{MODEL_NAME}.pt",
+    )
+
+    label_mapping = {
+        int(i): str(label)
+        for i, label in enumerate(label_encoder.classes_)
+    }
+
+with open(DEPLOY_LABEL_DIR / f"{MODEL_NAME}_labels.json", "w") as f:
+    json.dump(label_mapping, f, indent=4)
+    
+
+
     with open(OUTPUT_DIR / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=4)
 
@@ -615,6 +653,11 @@ def main():
     joblib.dump(life_scaler, OUTPUT_DIR / "lifetime_scaler.joblib")
     joblib.dump(scat_scaler, OUTPUT_DIR / "scattering_scaler.joblib")
     joblib.dump(scalar_scaler, OUTPUT_DIR / "scalar_scaler.joblib")
+    joblib.dump(spec_scaler, DEPLOY_CONFIG_DIR / f"{MODEL_NAME}_spectrometer_scaler.joblib")
+    joblib.dump(life_scaler, DEPLOY_CONFIG_DIR / f"{MODEL_NAME}_lifetime_scaler.joblib")
+    joblib.dump(scat_scaler, DEPLOY_CONFIG_DIR / f"{MODEL_NAME}_scattering_scaler.joblib")
+    joblib.dump(scalar_scaler, DEPLOY_CONFIG_DIR / f"{MODEL_NAME}_scalar_scaler.joblib")
+    joblib.dump(label_encoder, DEPLOY_LABEL_DIR / f"{MODEL_NAME}_label_encoder.joblib")
 
     np.save(OUTPUT_DIR / "train_idx.npy", train_idx)
     np.save(OUTPUT_DIR / "val_idx.npy", val_idx)

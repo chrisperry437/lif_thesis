@@ -4,7 +4,7 @@ services:
     container_name: lif_thesis_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: lif_user
+      POSTGRES_USER: lif_thesis
       POSTGRES_PASSWORD: lif_password
       POSTGRES_DB: lif_thesis
     ports:
@@ -12,7 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lif_user"]
+      test: ["CMD-SHELL", "pg_isready -U lif_thesis"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -29,7 +29,7 @@ services:
       database:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://lif_user:lif_password@database:5432/lif_thesis
+      DATABASE_URL: postgresql://lif_thesis:lif_password@database:5432/lif_thesis
       MODEL_REGISTRY: /app/models/model_registry.csv
       MODEL_DIR: /app/models/trained
     volumes:
