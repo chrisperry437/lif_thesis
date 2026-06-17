@@ -44,7 +44,7 @@ from sklearn.preprocessing import LabelEncoder
 
 DATA_PATH = Path("data/processed/bacterial_samples.parquet")
 OUTPUT_DIR = Path("results/exp00_paper_reproduction")
-
+MODEL_DIR = Path("models/trained/exp00_paper_rf_v1")
 
 # ------------------------------------------------------------
 # Feature construction
@@ -233,6 +233,7 @@ def evaluate_model(
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
     label_col = "species"
     fluorescence_threshold = 2000
@@ -437,6 +438,34 @@ def main():
 
     joblib.dump(best_model, OUTPUT_DIR / "paper_reproduction_rf.joblib")
     joblib.dump(label_encoder, OUTPUT_DIR / "label_encoder.joblib")
+    joblib.dump(best_model, MODEL_DIR / "model.joblib")
+    joblib.dump(label_encoder, MODEL_DIR / "label_encoder.joblib")
+
+    deployment_metadata = {
+        "model_name": "exp00_paper_rf_v1",
+        "model_type": "RandomForestClassifier",
+        "framework": "sklearn",
+        "task": "multiclass_species_classification",
+        "feature_set": best_config["feature_set"],
+        "feature_names_file": "feature_names.json",
+        "label_encoder_file": "label_encoder.joblib",
+        "model_file": "model.joblib",
+        "label_col": label_col,
+        "fluorescence_threshold": fluorescence_threshold,
+        "random_state": random_state,
+        "metrics": {
+            "accuracy": metrics["validation_final"]["accuracy"],
+            "balanced_accuracy": metrics["validation_final"]["balanced_accuracy"],
+            "macro_f1": metrics["validation_final"]["macro_f1"],
+        },
+        "notes": "Paper-style particle-level split; not grouped by raw_file.",
+    }
+
+    with open(MODEL_DIR / "metadata.json", "w", encoding="utf-8") as f:
+        json.dump(deployment_metadata, f, indent=4)
+
+    with open(MODEL_DIR / "feature_names.json", "w", encoding="utf-8") as f:
+        json.dump(best_feature_names, f, indent=4)
 
     np.save(OUTPUT_DIR / "train_idx.npy", train_idx)
     np.save(OUTPUT_DIR / "test_tuning_idx.npy", test_idx)

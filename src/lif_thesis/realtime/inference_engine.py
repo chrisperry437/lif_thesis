@@ -22,12 +22,37 @@ The engine handles:
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from lif_thesis.data.schemas import RAPIDE_DIMS
 
 import pandas as pd
+
+
+CONFIG_PATH = Path("configs/active_model.json")
+MODELS_DIR = Path("models/trained")
+
+
+def get_active_model_dir() -> Path:
+    if not CONFIG_PATH.exists():
+        raise FileNotFoundError(
+            f"Active model config not found: {CONFIG_PATH}"
+        )
+
+    with CONFIG_PATH.open("r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    active_model = config["active_model"]
+    model_dir = MODELS_DIR / active_model
+
+    if not model_dir.exists():
+        raise FileNotFoundError(
+            f"Active model directory not found: {model_dir}"
+        )
+
+    return model_dir
 
 from lif_thesis.data.preprocessing import (
     PreprocessingConfig,

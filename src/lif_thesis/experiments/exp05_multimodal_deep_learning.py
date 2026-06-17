@@ -624,7 +624,10 @@ def main():
         "scattering_target_acquisitions": RAPIDE_DIMS.SCATTERING_TARGET_ACQUISITIONS,
         "n_scattering_angles": RAPIDE_DIMS.N_SCATTERING_ANGLES,
     }
-
+    DEPLOY_MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    DEPLOY_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    DEPLOY_LABEL_DIR.mkdir(parents=True, exist_ok=True)
+    
     torch.save(
         deployment_checkpoint,
         DEPLOY_MODEL_DIR / f"{MODEL_NAME}.pt",
@@ -635,8 +638,8 @@ def main():
         for i, label in enumerate(label_encoder.classes_)
     }
 
-with open(DEPLOY_LABEL_DIR / f"{MODEL_NAME}_labels.json", "w") as f:
-    json.dump(label_mapping, f, indent=4)
+    with open(DEPLOY_LABEL_DIR / f"{MODEL_NAME}_labels.json", "w") as f:
+        json.dump(label_mapping, f, indent=4)
     
 
 

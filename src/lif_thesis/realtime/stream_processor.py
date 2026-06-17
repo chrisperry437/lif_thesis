@@ -1,23 +1,28 @@
-## Connects file watcher ->> preprocessing >> prediction
+# src/lif_thesis/streaming/stream_processor.py
+
 """
 Real-time stream processor for Rapid-E particle files.
 
-This module connects the real-time pipeline:
+Pipeline:
 
-    file_watcher -> loader -> predictor -> prediction outputs
+    file_watcher
+        -> load particle file
+        -> add stream metadata
+        -> predictor
+        -> prediction outputs
 
-It is designed to work with both:
-    - data/realtime_mock/ for thesis demos
-    - a live Rapid-E output directory
-
-Expected input files:
+Supports:
     - .csv
     - .parquet
     - .json
     - .jsonl
+    - .raw
 
-For raw Rapid-E formats, add the format-specific logic to
-`load_particle_file()`.
+For .raw files, this expects:
+
+    lif_thesis.data.rapid_e_raw_parser.decode_raw_file
+
+to return a particle-level pandas DataFrame.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+from lif_thesis.realtime.multimodal_inference_engine import MultimodalInferenceEngine
 
 import pandas as pd
 
@@ -39,7 +45,22 @@ from lif_thesis.models.predict import (
     summarize_predictions,
 )
 
+try:
+    from lif_thesis.data.rapid_e_raw_parser import decode_raw_file
+except ImportError:
+    decode_raw_file = None
+
+
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_FILE_PATTERNS = (
+    "*.csv",
+    "*.parquet",
+    "*.json",
+    "*.jsonl",
+    "*.raw",
+)
 
 
 @dataclass(frozen=True)
@@ -48,7 +69,7 @@ class StreamProcessorConfig:
 
     input_dir: Path
     output_dir: Path = Path("results/realtime")
-    file_patterns: tuple[str, ...] = ("*.csv", "*.parquet", "*.json", "*.jsonl")
+    file_patterns: tuple[str, ...] = DEFAULT_FILE_PATTERNS
     recursive: bool = False
     include_existing: bool = False
     poll_interval: float = 1.0
@@ -60,31 +81,26 @@ class StreamProcessorConfig:
 
 
 def ensure_output_dir(path: Path) -> None:
-    """Create output directory if it does not exist."""
     path.mkdir(parents=True, exist_ok=True)
 
 
 def load_particle_file(path: Path) -> pd.DataFrame:
     """
-    Load one particle-level file.
+    Load one particle-level file into a pandas DataFrame.
 
-    Parameters
-    ----------
-    path:
-        Input file path.
-
-    Returns
-    -------
-    pd.DataFrame
-        Particle-level dataframe.
-
-    Notes
-    -----
-    This assumes the file has already been parsed into a particle-level table.
-    If your Rapid-E files are in a custom raw format, connect this function to
-    `lif_thesis.data.parsers` or `lif_thesis.data.loaders`.
+    .raw files require decode_raw_file() to convert Rapid-E binary records
+    into model-ready particle rows.
     """
     suffix = path.suffix.lower()
+
+    if suffix == ".raw":
+        if decode_raw_file is None:
+            raise ImportError(
+                "RAW support requires "
+                "lif_thesis.data.rapid_e_raw_parser.decode_raw_file"
+            )
+
+        return decode_raw_file(path)
 
     if suffix == ".csv":
         return pd.read_csv(path)
@@ -102,9 +118,6 @@ def load_particle_file(path: Path) -> pd.DataFrame:
 
 
 def add_stream_metadata(df: pd.DataFrame, source_file: Path) -> pd.DataFrame:
-    """
-    Add metadata columns used by the real-time pipeline.
-    """
     output = df.copy()
 
     output["source_file"] = source_file.name
@@ -122,9 +135,6 @@ def append_or_write_csv(
     path: Path,
     append: bool = True,
 ) -> None:
-    """
-    Write dataframe to CSV, optionally appending if file already exists.
-    """
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if append and path.exists():
@@ -137,9 +147,6 @@ def make_file_summary(
     predictions: pd.DataFrame,
     source_file: Path,
 ) -> pd.DataFrame:
-    """
-    Create a file-level summary of predictions.
-    """
     if predictions.empty:
         return pd.DataFrame(
             [
@@ -158,6 +165,11 @@ def make_file_summary(
 
     label_col = "predicted_label"
     confidence_col = "prediction_confidence"
+
+    if label_col not in predictions.columns:
+        raise KeyError(
+            f"Predictions are missing required column: {label_col}"
+        )
 
     label_counts = predictions[label_col].value_counts(dropna=False)
     top_label = str(label_counts.index[0])
@@ -184,29 +196,69 @@ def make_file_summary(
     )
 
 
+def serialize_array_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert list/tuple/dict columns to JSON strings before CSV writing.
+    """
+    output = df.copy()
+
+    for col in output.columns:
+        if output[col].apply(lambda x: isinstance(x, (list, tuple, dict))).any():
+            output[col] = output[col].apply(
+                lambda x: json.dumps(x)
+                if isinstance(x, (list, tuple, dict))
+                else x
+            )
+
+    return output
+
+
 def save_prediction_outputs(
     predictions: pd.DataFrame,
     source_file: Path,
     output_dir: Path,
     append: bool = True,
 ) -> None:
-    """
-    Save particle-level predictions and summaries.
-    """
     ensure_output_dir(output_dir)
 
     if not predictions.empty:
         predictions_to_save = predictions.copy()
 
-        # Convert array-like columns to strings so CSV writing does not break.
-        for col in predictions_to_save.columns:
-            if predictions_to_save[col].apply(lambda x: isinstance(x, (list, tuple))).any():
-                predictions_to_save[col] = predictions_to_save[col].apply(json.dumps)
+        prediction_output_columns = [
+            "source_file",
+            "source_path",
+            "processed_at",
+            "event_time",
+            "raw_file",
+            "particle_index",
+            "timestamp",
+            "size",
+            "time_asymmetry",
+            "predicted_class_index",
+            "predicted_label",
+            "prediction_confidence",
+        ]
 
-        particle_path = output_dir / "predictions.csv"
-        append_or_write_csv(predictions_to_save, particle_path, append=append)
+        prob_cols = [
+            col for col in predictions_to_save.columns
+            if col.startswith("prob_")
+        ]
+
+        keep_cols = [
+            col for col in prediction_output_columns
+            if col in predictions_to_save.columns
+        ] + prob_cols
+
+        predictions_to_save = predictions_to_save[keep_cols]
+
+        append_or_write_csv(
+            predictions_to_save,
+            output_dir / "predictions.csv",
+            append=append,
+        )
 
     file_summary = make_file_summary(predictions, source_file)
+
     append_or_write_csv(
         file_summary,
         output_dir / "file_summary.csv",
@@ -214,14 +266,19 @@ def save_prediction_outputs(
     )
 
     label_summary = summarize_predictions(predictions)
-    label_summary["source_file"] = source_file.name
-    label_summary["processed_at"] = pd.Timestamp.utcnow().isoformat()
 
-    append_or_write_csv(
-        label_summary,
-        output_dir / "label_summary.csv",
-        append=append,
-    )
+    if label_summary is None:
+        label_summary = pd.DataFrame()
+
+    if not label_summary.empty:
+        label_summary["source_file"] = source_file.name
+        label_summary["processed_at"] = pd.Timestamp.utcnow().isoformat()
+
+        append_or_write_csv(
+            label_summary,
+            output_dir / "label_summary.csv",
+            append=append,
+        )
 
 
 def process_file(
@@ -229,15 +286,6 @@ def process_file(
     predictor: ParticlePredictor,
     config: StreamProcessorConfig,
 ) -> pd.DataFrame:
-    """
-    Process one newly detected particle file.
-
-    Steps:
-        1. Load particle file
-        2. Add stream metadata
-        3. Predict labels
-        4. Save outputs
-    """
     logger.info("Processing file: %s", path)
 
     particles = load_particle_file(path)
@@ -257,7 +305,11 @@ def process_file(
             append=config.append_outputs,
         )
 
-    logger.info("Finished processing %s with %d predictions", path.name, len(predictions))
+    logger.info(
+        "Finished processing %s with %d predictions",
+        path.name,
+        len(predictions),
+    )
 
     return predictions
 
@@ -275,20 +327,22 @@ class StreamProcessor:
         prediction_config: PredictionConfig,
     ) -> None:
         self.stream_config = stream_config
-        self.predictor = ParticlePredictor(prediction_config)
+        self.predictor = MultimodalInferenceEngine(
+            model_path=prediction_config.model_path,
+            label_map_path=prediction_config.label_mapping_path,
+        )
         ensure_output_dir(stream_config.output_dir)
 
     def run_once(self, files: Iterable[Path]) -> list[pd.DataFrame]:
-        """
-        Process a finite list of files.
-
-        Useful for tests and debugging.
-        """
         outputs: list[pd.DataFrame] = []
 
         for path in files:
             try:
-                predictions = process_file(path, self.predictor, self.stream_config)
+                predictions = process_file(
+                    path,
+                    self.predictor,
+                    self.stream_config,
+                )
                 outputs.append(predictions)
             except Exception:
                 logger.exception("Failed to process file: %s", path)
@@ -296,12 +350,10 @@ class StreamProcessor:
         return outputs
 
     def run_forever(self) -> None:
-        """
-        Watch input directory continuously and process new files.
-        """
         logger.info("Starting stream processor")
         logger.info("Input directory: %s", self.stream_config.input_dir)
         logger.info("Output directory: %s", self.stream_config.output_dir)
+        logger.info("Patterns: %s", self.stream_config.file_patterns)
 
         for path in watch_directory(
             directory=self.stream_config.input_dir,
@@ -329,7 +381,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input-dir",
         type=Path,
-        default=Path("data/realtime_mock"),
+        default=Path("data/live_rapid_e/raw"),
         help="Directory containing incoming Rapid-E particle files.",
     )
 
@@ -350,7 +402,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-type",
         choices=["sklearn", "torch"],
-        default="sklearn",
+        default="torch",
         help="Model artifact type.",
     )
 
@@ -388,6 +440,26 @@ def parse_args() -> argparse.Namespace:
         help="File pattern to watch. Can be repeated.",
     )
 
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Watch subdirectories recursively.",
+    )
+
+    parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=1.0,
+        help="Seconds between directory scans.",
+    )
+
+    parser.add_argument(
+        "--stable-seconds",
+        type=float,
+        default=2.0,
+        help="Seconds a file size must remain stable before processing.",
+    )
+
     return parser.parse_args()
 
 
@@ -404,8 +476,11 @@ def main() -> None:
         output_dir=args.output_dir,
         file_patterns=tuple(args.pattern)
         if args.pattern
-        else ("*.csv", "*.parquet", "*.json", "*.jsonl"),
+        else DEFAULT_FILE_PATTERNS,
+        recursive=args.recursive,
         include_existing=args.include_existing,
+        poll_interval=args.poll_interval,
+        stable_seconds=args.stable_seconds,
     )
 
     prediction_config = PredictionConfig(
